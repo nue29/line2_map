@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2호선 혼잡도 지도</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif; background: #fff; color: #111; }
+.wrap { padding: 1.5rem; max-width: 920px; margin: 0 auto; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 1rem; color: #111; }
+.control-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+.ctrl-group { display: flex; gap: 4px; }
+.group-label { font-size: 12px; color: #6b7280; margin-right: 4px; align-self: center; }
+.ctrl-btn { padding: 5px 13px; font-size: 13px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #374151; cursor: pointer; transition: background 0.1s; }
+.ctrl-btn.active { background: #f0fdf4; border-color: #2eb149; color: #166534; font-weight: 500; }
+.ctrl-btn:hover:not(.active) { background: #f9fafb; }
+.legend { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #6b7280; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.map-wrap { position: relative; margin-top: 1rem; }
+#map-canvas { display: block; width: 100%; }
+.tooltip { position: absolute; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 16px; font-size: 13px; pointer-events: none; opacity: 0; transition: opacity 0.15s; min-width: 210px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.tt-name { font-size: 15px; font-weight: 500; color: #111; margin-bottom: 8px; border-bottom: 1px solid #f3f4f6; padding-bottom: 6px; }
+.tt-row { display: flex; justify-content: space-between; gap: 16px; margin-top: 4px; color: #6b7280; font-size: 12px; }
+.tt-val { color: #111; font-weight: 500; }
+.tt-divider { border-top: 1px solid #f3f4f6; margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>2호선 역별 혼잡도 지도</h1>
+
+  <div class="control-row">
+    <span class="group-label">요일</span>
+    <div class="ctrl-group">
+      <button class="ctrl-btn active" onclick="setDay('평일', this)">평일</button>
+      <button class="ctrl-btn" onclick="setDay('토요일', this)">토요일</button>
+      <button class="ctrl-btn" onclick="setDay('일요일', this)">일요일</button>
+    </div>
+  </div>
+  <div class="control-row">
+    <span class="group-label">방향</span>
+    <div class="ctrl-group">
+      <button class="ctrl-btn active" onclick="setDir('both', this)">전체</button>
+      <button class="ctrl-btn" onclick="setDir('inner', this)">내선</button>
+      <button class="ctrl-btn" onclick="setDir('outer', this)">외선</button>
+    </div>
+    <span class="group-label" style="margin-left:8px">기준</span>
+    <div class="ctrl-group">
+      <button class="ctrl-btn" onclick="setMode('avg', this)">평균 혼잡도</button>
+      <button class="ctrl-btn active" onclick="setMode('peak', this)">피크 혼잡도</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#86efac"></div>매우여유 (~34%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div>여유 (34~59%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#facc15"></div>보통 (59~100%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#fb923c"></div>혼잡 (100~150%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>매우혼잡 (150%+)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#94a3b8"></div>데이터 없음</div>
+  </div>
+
+  <div class="map-wrap">
+    <canvas id="map-canvas"></canvas>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+</div>
+
+<script>
+const ALL_DATA = {"평일":{
+    "강남":{"no":222,"inner":{"avg":56.4,"peak":133.7,"peakT":"18시"},"outer":{"avg":51.9,"peak":102.4,"peakT":"8시30분"}},
+    "강변":{"no":214,"inner":{"avg":30.5,"peak":65.5,"peakT":"8시"},"outer":{"avg":32.6,"peak":65.0,"peakT":"18시"}},
+    "건대입구":{"no":212,"inner":{"avg":31.7,"peak":57.4,"peakT":"18시30분"},"outer":{"avg":34.2,"peak":72.1,"peakT":"8시"}},
+    "교대":{"no":223,"inner":{"avg":57.7,"peak":135.6,"peakT":"18시"},"outer":{"avg":54.2,"peak":121.2,"peakT":"8시30분"}},
+    "구로디지털단지":{"no":232,"inner":{"avg":44.4,"peak":91.4,"peakT":"18시"},"outer":{"avg":40.0,"peak":68.8,"peakT":"18시30분"}},
+    "구의":{"no":213,"inner":{"avg":30.4,"peak":59.1,"peakT":"8시"},"outer":{"avg":33.7,"peak":63.3,"peakT":"18시"}},
+    "낙성대":{"no":227,"inner":{"avg":51.8,"peak":116.2,"peakT":"17시30분"},"outer":{"avg":50.4,"peak":130.2,"peakT":"8시30분"}},
+    "당산":{"no":237,"inner":{"avg":44.9,"peak":114.7,"peakT":"8시"},"outer":{"avg":44.8,"peak":96.8,"peakT":"18시30분"}},
+    "대림":{"no":233,"inner":{"avg":45.7,"peak":90.5,"peakT":"5시30분"},"outer":{"avg":42.9,"peak":75.1,"peakT":"8시30분"}},
+    "동대문역사문화공원":{"no":205,"inner":{"avg":46.6,"peak":86.8,"peakT":"18시"},"outer":{"avg":40.8,"peak":92.2,"peakT":"8시"}},
+    "뚝섬":{"no":210,"inner":{"avg":33.2,"peak":64.0,"peakT":"17시"},"outer":{"avg":34.1,"peak":75.6,"peakT":"18시"}},
+    "문래":{"no":235,"inner":{"avg":45.0,"peak":122.0,"peakT":"8시"},"outer":{"avg":46.6,"peak":96.5,"peakT":"18시30분"}},
+    "방배":{"no":225,"inner":{"avg":58.2,"peak":143.2,"peakT":"18시"},"outer":{"avg":54.0,"peak":143.2,"peakT":"8시30분"}},
+    "봉천":{"no":229,"inner":{"avg":46.0,"peak":105.1,"peakT":"17시30분"},"outer":{"avg":44.4,"peak":108.0,"peakT":"8시30분"}},
+    "사당":{"no":226,"inner":{"avg":54.3,"peak":123.9,"peakT":"18시30분"},"outer":{"avg":54.2,"peak":148.1,"peakT":"8시30분"}},
+    "삼성":{"no":219,"inner":{"avg":39.5,"peak":82.8,"peakT":"8시30분"},"outer":{"avg":38.4,"peak":109.6,"peakT":"18시"}},
+    "상왕십리":{"no":207,"inner":{"avg":46.6,"peak":81.3,"peakT":"17시"},"outer":{"avg":45.7,"peak":90.0,"peakT":"18시30분"}},
+    "서울대입구":{"no":228,"inner":{"avg":47.3,"peak":111.2,"peakT":"17시30분"},"outer":{"avg":48.4,"peak":119.7,"peakT":"8시30분"}},
+    "서초":{"no":224,"inner":{"avg":57.4,"peak":143.3,"peakT":"18시"},"outer":{"avg":54.6,"peak":133.3,"peakT":"8시30분"}},
+    "선릉":{"no":220,"inner":{"avg":50.0,"peak":99.4,"peakT":"18시"},"outer":{"avg":40.7,"peak":93.9,"peakT":"18시"}},
+    "성수":{"no":211,"inner":{"avg":32.7,"peak":75.0,"peakT":"18시30분"},"outer":{"avg":0.0,"peak":0.0,"peakT":"5시30분"}},
+    "시청":{"no":201,"inner":{"avg":41.5,"peak":97.1,"peakT":"8시"},"outer":{"avg":42.8,"peak":111.5,"peakT":"18시"}},
+    "신당":{"no":206,"inner":{"avg":46.9,"peak":86.6,"peakT":"17시30분"},"outer":{"avg":45.6,"peak":90.8,"peakT":"8시"}},
+    "신대방":{"no":231,"inner":{"avg":41.1,"peak":81.4,"peakT":"17시30분"},"outer":{"avg":39.4,"peak":72.2,"peakT":"8시30분"}},
+    "신도림":{"no":234,"inner":{"avg":42.7,"peak":129.9,"peakT":"8시"},"outer":{"avg":40.3,"peak":77.2,"peakT":"18시30분"}},
+    "신림":{"no":230,"inner":{"avg":41.0,"peak":88.8,"peakT":"17시30분"},"outer":{"avg":43.3,"peak":97.0,"peakT":"8시30분"}},
+    "신촌(지하)":{"no":240,"inner":{"avg":40.2,"peak":114.3,"peakT":"8시"},"outer":{"avg":41.5,"peak":103.2,"peakT":"18시30분"}},
+    "아현":{"no":242,"inner":{"avg":40.9,"peak":115.0,"peakT":"8시"},"outer":{"avg":41.5,"peak":106.2,"peakT":"18시30분"}},
+    "역삼":{"no":221,"inner":{"avg":52.2,"peak":126.4,"peakT":"18시"},"outer":{"avg":49.6,"peak":99.2,"peakT":"18시"}},
+    "영등포구청":{"no":236,"inner":{"avg":43.7,"peak":117.5,"peakT":"8시"},"outer":{"avg":46.2,"peak":96.1,"peakT":"18시30분"}},
+    "왕십리":{"no":208,"inner":{"avg":36.1,"peak":70.9,"peakT":"8시30분"},"outer":{"avg":45.2,"peak":85.9,"peakT":"18시30분"}},
+    "을지로3가":{"no":203,"inner":{"avg":40.4,"peak":84.1,"peakT":"18시"},"outer":{"avg":41.2,"peak":83.7,"peakT":"18시"}},
+    "을지로4가":{"no":204,"inner":{"avg":41.9,"peak":88.4,"peakT":"18시"},"outer":{"avg":39.5,"peak":83.4,"peakT":"8시"}},
+    "을지로입구":{"no":202,"inner":{"avg":41.5,"peak":85.5,"peakT":"18시"},"outer":{"avg":41.6,"peak":101.0,"peakT":"18시"}},
+    "이대":{"no":241,"inner":{"avg":40.3,"peak":111.1,"peakT":"8시"},"outer":{"avg":40.7,"peak":104.3,"peakT":"18시30분"}},
+    "잠실":{"no":216,"inner":{"avg":35.9,"peak":93.2,"peakT":"8시"},"outer":{"avg":32.4,"peak":67.4,"peakT":"18시"}},
+    "잠실나루":{"no":215,"inner":{"avg":30.4,"peak":64.3,"peakT":"8시30분"},"outer":{"avg":32.3,"peak":67.5,"peakT":"18시"}},
+    "잠실새내":{"no":217,"inner":{"avg":35.4,"peak":98.7,"peakT":"8시30분"},"outer":{"avg":38.2,"peak":89.0,"peakT":"18시"}},
+    "종합운동장":{"no":218,"inner":{"avg":36.1,"peak":107.1,"peakT":"8시30분"},"outer":{"avg":37.9,"peak":91.5,"peakT":"18시"}},
+    "충정로":{"no":243,"inner":{"avg":41.7,"peak":113.8,"peakT":"8시"},"outer":{"avg":41.8,"peak":109.0,"peakT":"18시"}},
+    "한양대":{"no":209,"inner":{"avg":34.6,"peak":63.2,"peakT":"8시30분"},"outer":{"avg":35.6,"peak":77.1,"peakT":"18시"}},
+    "합정":{"no":238,"inner":{"avg":39.3,"peak":108.9,"peakT":"8시"},"outer":{"avg":46.6,"peak":98.3,"peakT":"18시30분"}},
+    "홍대입구":{"no":239,"inner":{"avg":40.1,"peak":118.6,"peakT":"8시"},"outer":{"avg":40.5,"peak":91.2,"peakT":"18시30분"}}
+  },"토요일":{
+    "강남":{"no":222,"inner":{"avg":45.5,"peak":77.1,"peakT":"22시"},"outer":{"avg":45.7,"peak":75.4,"peakT":"13시30분"}},
+    "강변":{"no":214,"inner":{"avg":30.6,"peak":50.4,"peakT":"15시30분"},"outer":{"avg":35.0,"peak":65.2,"peakT":"16시30분"}},
+    "건대입구":{"no":212,"inner":{"avg":32.8,"peak":53.0,"peakT":"15시30분"},"outer":{"avg":37.9,"peak":69.3,"peakT":"13시30분"}},
+    "교대":{"no":223,"inner":{"avg":46.8,"peak":80.9,"peakT":"22시"},"outer":{"avg":49.5,"peak":83.1,"peakT":"13시"}},
+    "구로디지털단지":{"no":232,"inner":{"avg":41.0,"peak":69.7,"peakT":"16시"},"outer":{"avg":40.6,"peak":61.9,"peakT":"23시30분"}},
+    "구의":{"no":213,"inner":{"avg":31.2,"peak":51.4,"peakT":"15시30분"},"outer":{"avg":36.5,"peak":66.4,"peakT":"16시30분"}},
+    "낙성대":{"no":227,"inner":{"avg":44.2,"peak":76.5,"peakT":"22시"},"outer":{"avg":49.7,"peak":85.1,"peakT":"13시"}},
+    "당산":{"no":237,"inner":{"avg":48.0,"peak":84.6,"peakT":"12시30분"},"outer":{"avg":46.3,"peak":80.8,"peakT":"21시"}},
+    "대림":{"no":233,"inner":{"avg":42.2,"peak":67.7,"peakT":"5시30분"},"outer":{"avg":43.9,"peak":79.3,"peakT":"23시30분"}},
+    "동대문역사문화공원":{"no":205,"inner":{"avg":44.4,"peak":76.4,"peakT":"16시30분"},"outer":{"avg":42.9,"peak":68.8,"peakT":"15시30분"}},
+    "뚝섬":{"no":210,"inner":{"avg":32.0,"peak":58.7,"peakT":"17시"},"outer":{"avg":36.8,"peak":64.6,"peakT":"17시"}},
+    "문래":{"no":235,"inner":{"avg":44.8,"peak":72.4,"peakT":"12시30분"},"outer":{"avg":46.5,"peak":80.4,"peakT":"21시"}},
+    "방배":{"no":225,"inner":{"avg":47.0,"peak":80.9,"peakT":"16시30분"},"outer":{"avg":50.9,"peak":84.3,"peakT":"13시"}},
+    "봉천":{"no":229,"inner":{"avg":40.1,"peak":70.2,"peakT":"16시"},"outer":{"avg":44.1,"peak":70.3,"peakT":"9시"}},
+    "사당":{"no":226,"inner":{"avg":45.9,"peak":87.9,"peakT":"22시"},"outer":{"avg":51.1,"peak":87.8,"peakT":"13시"}},
+    "삼성":{"no":219,"inner":{"avg":34.6,"peak":55.8,"peakT":"22시"},"outer":{"avg":35.7,"peak":69.8,"peakT":"16시"}},
+    "상왕십리":{"no":207,"inner":{"avg":43.6,"peak":73.6,"peakT":"16시30분"},"outer":{"avg":47.3,"peak":76.8,"peakT":"18시"}},
+    "서울대입구":{"no":228,"inner":{"avg":40.8,"peak":71.4,"peakT":"16시"},"outer":{"avg":47.8,"peak":79.3,"peakT":"13시"}},
+    "서초":{"no":224,"inner":{"avg":46.5,"peak":79.1,"peakT":"16시"},"outer":{"avg":51.5,"peak":86.0,"peakT":"13시"}},
+    "선릉":{"no":220,"inner":{"avg":40.9,"peak":68.3,"peakT":"22시"},"outer":{"avg":37.6,"peak":68.1,"peakT":"16시"}},
+    "성수":{"no":211,"inner":{"avg":34.0,"peak":59.3,"peakT":"17시"},"outer":{"avg":0.0,"peak":0.0,"peakT":"5시30분"}},
+    "시청":{"no":201,"inner":{"avg":41.2,"peak":78.1,"peakT":"16시30분"},"outer":{"avg":46.2,"peak":76.7,"peakT":"15시30분"}},
+    "신당":{"no":206,"inner":{"avg":44.2,"peak":76.8,"peakT":"16시30분"},"outer":{"avg":47.1,"peak":74.9,"peakT":"18시"}},
+    "신대방":{"no":231,"inner":{"avg":38.0,"peak":64.4,"peakT":"16시"},"outer":{"avg":40.0,"peak":60.3,"peakT":"16시30분"}},
+    "신도림":{"no":234,"inner":{"avg":42.6,"peak":77.2,"peakT":"13시30분"},"outer":{"avg":41.8,"peak":63.6,"peakT":"23시"}},
+    "신림":{"no":230,"inner":{"avg":37.3,"peak":67.1,"peakT":"16시"},"outer":{"avg":43.1,"peak":65.5,"peakT":"13시"}},
+    "신촌(지하)":{"no":240,"inner":{"avg":41.8,"peak":72.8,"peakT":"16시30분"},"outer":{"avg":44.5,"peak":77.0,"peakT":"16시30분"}},
+    "아현":{"no":242,"inner":{"avg":42.5,"peak":76.6,"peakT":"16시30분"},"outer":{"avg":45.1,"peak":78.4,"peakT":"15시30분"}},
+    "역삼":{"no":221,"inner":{"avg":41.8,"peak":68.4,"peakT":"16시30분"},"outer":{"avg":44.0,"peak":72.9,"peakT":"16시"}},
+    "영등포구청":{"no":236,"inner":{"avg":44.6,"peak":77.9,"peakT":"12시30분"},"outer":{"avg":46.7,"peak":79.5,"peakT":"21시"}},
+    "왕십리":{"no":208,"inner":{"avg":33.6,"peak":58.1,"peakT":"17시"},"outer":{"avg":46.7,"peak":77.0,"peakT":"18시"}},
+    "을지로3가":{"no":203,"inner":{"avg":39.7,"peak":74.8,"peakT":"23시"},"outer":{"avg":43.4,"peak":71.0,"peakT":"15시30분"}},
+    "을지로4가":{"no":204,"inner":{"avg":40.5,"peak":76.6,"peakT":"23시"},"outer":{"avg":41.4,"peak":66.3,"peakT":"15시30분"}},
+    "을지로입구":{"no":202,"inner":{"avg":41.4,"peak":78.9,"peakT":"16시30분"},"outer":{"avg":44.2,"peak":72.5,"peakT":"18시"}},
+    "이대":{"no":241,"inner":{"avg":42.0,"peak":74.0,"peakT":"16시30분"},"outer":{"avg":44.4,"peak":76.9,"peakT":"15시30분"}},
+    "잠실":{"no":216,"inner":{"avg":33.7,"peak":56.4,"peakT":"15시30분"},"outer":{"avg":34.1,"peak":63.6,"peakT":"17시"}},
+    "잠실나루":{"no":215,"inner":{"avg":30.5,"peak":53.1,"peakT":"15시30분"},"outer":{"avg":34.1,"peak":63.2,"peakT":"16시30분"}},
+    "잠실새내":{"no":217,"inner":{"avg":32.7,"peak":51.5,"peakT":"16시"},"outer":{"avg":36.6,"peak":71.3,"peakT":"17시"}},
+    "종합운동장":{"no":218,"inner":{"avg":32.4,"peak":44.9,"peakT":"22시"},"outer":{"avg":35.8,"peak":71.3,"peakT":"17시"}},
+    "충정로":{"no":243,"inner":{"avg":43.0,"peak":78.0,"peakT":"16시30분"},"outer":{"avg":45.3,"peak":78.9,"peakT":"15시30분"}},
+    "한양대":{"no":209,"inner":{"avg":32.8,"peak":58.0,"peakT":"17시"},"outer":{"avg":37.4,"peak":64.7,"peakT":"18시"}},
+    "합정":{"no":238,"inner":{"avg":41.7,"peak":73.0,"peakT":"12시30분"},"outer":{"avg":48.9,"peak":84.4,"peakT":"21시"}},
+    "홍대입구":{"no":239,"inner":{"avg":42.1,"peak":68.3,"peakT":"16시30분"},"outer":{"avg":43.4,"peak":74.9,"peakT":"17시30분"}}
+  },
+    "일요일":{
+    "강남":{"no":222,"inner":{"avg":29.5,"peak":52.3,"peakT":"20시30분"},"outer":{"avg":27.9,"peak":51.3,"peakT":"13시30분"}},
+    "강변":{"no":214,"inner":{"avg":21.4,"peak":36.4,"peakT":"13시"},"outer":{"avg":23.8,"peak":41.5,"peakT":"16시30분"}},
+    "건대입구":{"no":212,"inner":{"avg":23.0,"peak":39.1,"peakT":"15시30분"},"outer":{"avg":25.7,"peak":47.6,"peakT":"13시30분"}},
+    "교대":{"no":223,"inner":{"avg":31.2,"peak":53.6,"peakT":"20시30분"},"outer":{"avg":29.3,"peak":51.2,"peakT":"13시"}},
+    "구로디지털단지":{"no":232,"inner":{"avg":26.7,"peak":41.1,"peakT":"16시"},"outer":{"avg":25.0,"peak":38.9,"peakT":"18시"}},
+    "구의":{"no":213,"inner":{"avg":22.0,"peak":37.2,"peakT":"15시30분"},"outer":{"avg":24.6,"peak":43.8,"peakT":"16시30분"}},
+    "낙성대":{"no":227,"inner":{"avg":29.5,"peak":55.0,"peakT":"21시"},"outer":{"avg":30.0,"peak":50.6,"peakT":"13시"}},
+    "당산":{"no":237,"inner":{"avg":30.7,"peak":58.5,"peakT":"12시30분"},"outer":{"avg":29.3,"peak":53.5,"peakT":"21시"}},
+    "대림":{"no":233,"inner":{"avg":27.5,"peak":44.4,"peakT":"13시30분"},"outer":{"avg":27.0,"peak":46.4,"peakT":"23시30분"}},
+    "동대문역사문화공원":{"no":205,"inner":{"avg":30.6,"peak":52.0,"peakT":"16시30분"},"outer":{"avg":28.2,"peak":44.4,"peakT":"15시30분"}},
+    "뚝섬":{"no":210,"inner":{"avg":22.6,"peak":38.8,"peakT":"15시30분"},"outer":{"avg":25.3,"peak":46.0,"peakT":"18시"}},
+    "문래":{"no":235,"inner":{"avg":28.8,"peak":49.5,"peakT":"12시30분"},"outer":{"avg":29.1,"peak":56.1,"peakT":"21시"}},
+    "방배":{"no":225,"inner":{"avg":30.9,"peak":56.5,"peakT":"20시30분"},"outer":{"avg":30.1,"peak":52.2,"peakT":"13시"}},
+    "봉천":{"no":229,"inner":{"avg":26.1,"peak":44.2,"peakT":"21시"},"outer":{"avg":26.3,"peak":39.0,"peakT":"13시"}},
+    "사당":{"no":226,"inner":{"avg":31.1,"peak":58.4,"peakT":"21시"},"outer":{"avg":30.3,"peak":55.8,"peakT":"13시"}},
+    "삼성":{"no":219,"inner":{"avg":23.4,"peak":41.3,"peakT":"20시30분"},"outer":{"avg":23.0,"peak":44.0,"peakT":"13시30분"}},
+    "상왕십리":{"no":207,"inner":{"avg":30.0,"peak":49.7,"peakT":"16시30분"},"outer":{"avg":31.6,"peak":51.3,"peakT":"18시"}},
+    "서울대입구":{"no":228,"inner":{"avg":26.6,"peak":48.2,"peakT":"21시"},"outer":{"avg":28.9,"peak":45.8,"peakT":"13시"}},
+    "서초":{"no":224,"inner":{"avg":30.6,"peak":56.0,"peakT":"21시"},"outer":{"avg":30.7,"peak":54.6,"peakT":"13시"}},
+    "선릉":{"no":220,"inner":{"avg":26.8,"peak":46.8,"peakT":"20시30분"},"outer":{"avg":23.7,"peak":47.6,"peakT":"13시30분"}},
+    "성수":{"no":211,"inner":{"avg":23.7,"peak":40.5,"peakT":"15시30분"},"outer":{"avg":0.0,"peak":0.0,"peakT":"5시30분"}},
+    "시청":{"no":201,"inner":{"avg":28.3,"peak":43.4,"peakT":"16시30분"},"outer":{"avg":30.3,"peak":54.2,"peakT":"15시30분"}},
+    "신당":{"no":206,"inner":{"avg":30.5,"peak":52.5,"peakT":"16시30분"},"outer":{"avg":31.4,"peak":49.6,"peakT":"18시"}},
+    "신대방":{"no":231,"inner":{"avg":24.6,"peak":37.5,"peakT":"16시"},"outer":{"avg":24.5,"peak":37.3,"peakT":"18시"}},
+    "신도림":{"no":234,"inner":{"avg":27.4,"peak":49.7,"peakT":"13시30분"},"outer":{"avg":25.9,"peak":44.0,"peakT":"21시"}},
+    "신림":{"no":230,"inner":{"avg":24.1,"peak":37.3,"peakT":"16시"},"outer":{"avg":25.9,"peak":38.3,"peakT":"13시"}},
+    "신촌(지하)":{"no":240,"inner":{"avg":28.8,"peak":43.2,"peakT":"14시"},"outer":{"avg":28.8,"peak":48.5,"peakT":"15시30분"}},
+    "아현":{"no":242,"inner":{"avg":29.2,"peak":43.9,"peakT":"13시30분"},"outer":{"avg":29.5,"peak":52.0,"peakT":"15시30분"}},
+    "역삼":{"no":221,"inner":{"avg":27.7,"peak":48.7,"peakT":"18시"},"outer":{"avg":27.0,"peak":49.5,"peakT":"13시30분"}},
+    "영등포구청":{"no":236,"inner":{"avg":29.0,"peak":53.2,"peakT":"12시30분"},"outer":{"avg":29.1,"peak":55.4,"peakT":"21시"}},
+    "왕십리":{"no":208,"inner":{"avg":23.7,"peak":42.2,"peakT":"14시30분"},"outer":{"avg":31.3,"peak":51.8,"peakT":"18시"}},
+    "을지로3가":{"no":203,"inner":{"avg":27.4,"peak":45.8,"peakT":"16시30분"},"outer":{"avg":28.5,"peak":49.2,"peakT":"15시30분"}},
+    "을지로4가":{"no":204,"inner":{"avg":27.8,"peak":47.3,"peakT":"16시30분"},"outer":{"avg":27.5,"peak":43.4,"peakT":"15시30분"}},
+    "을지로입구":{"no":202,"inner":{"avg":28.3,"peak":46.6,"peakT":"16시30분"},"outer":{"avg":29.1,"peak":50.1,"peakT":"15시30분"}},
+    "이대":{"no":241,"inner":{"avg":28.9,"peak":43.6,"peakT":"14시"},"outer":{"avg":28.8,"peak":51.4,"peakT":"15시30분"}},
+    "잠실":{"no":216,"inner":{"avg":23.4,"peak":40.8,"peakT":"13시"},"outer":{"avg":23.3,"peak":41.2,"peakT":"17시"}},
+    "잠실나루":{"no":215,"inner":{"avg":21.4,"peak":37.1,"peakT":"12시30분"},"outer":{"avg":23.2,"peak":41.4,"peakT":"16시30분"}},
+    "잠실새내":{"no":217,"inner":{"avg":22.8,"peak":40.3,"peakT":"13시"},"outer":{"avg":23.8,"peak":42.8,"peakT":"16시30분"}},
+    "종합운동장":{"no":218,"inner":{"avg":22.3,"peak":34.7,"peakT":"17시30분"},"outer":{"avg":23.1,"peak":42.9,"peakT":"16시30분"}},
+    "충정로":{"no":243,"inner":{"avg":29.5,"peak":44.7,"peakT":"13시30분"},"outer":{"avg":29.6,"peak":52.4,"peakT":"15시30분"}},
+    "한양대":{"no":209,"inner":{"avg":23.2,"peak":41.2,"peakT":"14시30분"},"outer":{"avg":25.6,"peak":46.6,"peakT":"18시"}},
+    "합정":{"no":238,"inner":{"avg":27.1,"peak":52.6,"peakT":"12시30분"},"outer":{"avg":30.9,"peak":57.9,"peakT":"21시"}},
+    "홍대입구":{"no":239,"inner":{"avg":28.8,"peak":42.9,"peakT":"14시"},"outer":{"avg":27.2,"peak":48.6,"peakT":"20시30분"}}
+  }
+};
+
+let currentDay = '평일', dir = 'both', mode = 'peak';
+
+function getData() { return ALL_DATA[currentDay]; }
+
+const STATIONS = Object.keys(ALL_DATA['평일']).sort((a,b) => ALL_DATA['평일'][a].no - ALL_DATA['평일'][b].no);
+const N = STATIONS.length;
+
+function getColor(val) {
+  if (val === 0)   return '#94a3b8';
+  if (val < 34)    return '#86efac';
+  if (val < 59)    return '#16a34a';
+  if (val < 100)   return '#facc15';
+  if (val < 150)   return '#fb923c';
+  return '#ef4444';
+}
+
+function getVal(name) {
+  const d = getData()[name];
+  if (!d) return 0;
+  if (dir === 'inner') return d.inner[mode];
+  if (dir === 'outer') return d.outer[mode];
+  return Math.max(d.inner[mode], d.outer[mode]);
+}
+
+const canvas = document.getElementById('map-canvas');
+const ctx = canvas.getContext('2d');
+const tt = document.getElementById('tooltip');
+let stationPos = [], W, H;
+
+function calcPositions() {
+  const dpr = window.devicePixelRatio || 1;
+  W = canvas.parentElement.clientWidth;
+  H = Math.min(W * 0.78, 580);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+  const cx = W/2, cy = H/2, rx = W*0.37, ry = H*0.37;
+  stationPos = STATIONS.map((_, i) => {
+    const angle = (2*Math.PI*i/N) - Math.PI/2;
+    return [cx + rx*Math.cos(angle), cy + ry*Math.sin(angle)];
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.beginPath();
+  stationPos.forEach(([x,y], i) => i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y));
+  ctx.closePath();
+  ctx.strokeStyle = '#2eb149';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+
+  stationPos.forEach(([x,y], i) => {
+    const name = STATIONS[i];
+    const val = getVal(name);
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI*2);
+    ctx.fillStyle = getColor(val);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const angle = (2*Math.PI*i/N) - Math.PI/2;
+    const lx = x + Math.cos(angle)*22;
+    const ly = y + Math.sin(angle)*22;
+    ctx.font = '10px Malgun Gothic, sans-serif';
+    ctx.fillStyle = '#374151';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, lx, ly);
+  });
+}
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let hit = -1, minD = 16;
+  stationPos.forEach(([x,y], i) => { const d=Math.hypot(mx-x,my-y); if(d<minD){minD=d;hit=i;} });
+
+  if (hit >= 0) {
+    const name = STATIONS[hit];
+    const d = getData()[name];
+    tt.innerHTML = `
+      <div class="tt-name">${name} <span style="font-size:11px;color:#6b7280;font-weight:400">${currentDay}</span></div>
+      <div class="tt-row"><span>평균 혼잡도 (내선)</span><span class="tt-val">${d.inner.avg.toFixed(1)}%</span></div>
+      <div class="tt-row"><span>평균 혼잡도 (외선)</span><span class="tt-val">${d.outer.avg > 0 ? d.outer.avg.toFixed(1)+'%' : '데이터 없음'}</span></div>
+      <div class="tt-divider"></div>
+      <div class="tt-row"><span>피크 혼잡도 (내선)</span><span class="tt-val">${d.inner.peak.toFixed(1)}% · ${d.inner.peakT}</span></div>
+      <div class="tt-row"><span>피크 혼잡도 (외선)</span><span class="tt-val">${d.outer.peak > 0 ? d.outer.peak.toFixed(1)+'% · '+d.outer.peakT : '데이터 없음'}</span></div>
+    `;
+    canvas.style.cursor = 'pointer';
+    let tx = mx+14, ty = my+14;
+    if (tx+220>W) tx = mx-224;
+    if (ty+160>H) ty = my-164;
+    tt.style.left = tx+'px';
+    tt.style.top = ty+'px';
+    tt.style.opacity = '1';
+  } else {
+    tt.style.opacity = '0';
+    canvas.style.cursor = 'default';
+  }
+});
+canvas.addEventListener('mouseleave', () => { tt.style.opacity = '0'; });
+
+function setDay(d, btn) {
+  currentDay = d;
+  document.querySelectorAll('.ctrl-btn').forEach(b => { if(['평일','토요일','일요일'].includes(b.textContent)) b.classList.remove('active'); });
+  btn.classList.add('active');
+  draw();
+}
+function setDir(d, btn) {
+  dir = d;
+  document.querySelectorAll('.ctrl-btn').forEach(b => { if(['전체','내선','외선'].includes(b.textContent)) b.classList.remove('active'); });
+  btn.classList.add('active');
+  draw();
+}
+function setMode(m, btn) {
+  mode = m;
+  document.querySelectorAll('.ctrl-btn').forEach(b => { if(['평균 혼잡도','피크 혼잡도'].includes(b.textContent)) b.classList.remove('active'); });
+  btn.classList.add('active');
+  draw();
+}
+
+calcPositions();
+draw();
+window.addEventListener('resize', () => { calcPositions(); draw(); });
+</script>
+</body>
+</html>
